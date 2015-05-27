@@ -54,17 +54,22 @@ type Label struct {
 }
 
 type Epic struct {
-	ID          int    `json:"id"`
-	Kind        string `json:"kind"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
-	ProjectID   int    `json:"project_id"`
-	Name        string `json:"name"`
-	URL         string `json:"url"`
-	Label       Label  `json:"label"`
-	StartDate   time.Time
-	ReleaseDate time.Time
-	FinishDate  time.Time
+	ID                  int    `json:"id"`
+	Kind                string `json:"kind"`
+	CreatedAt           string `json:"created_at"`
+	UpdatedAt           string `json:"updated_at"`
+	ProjectID           int    `json:"project_id"`
+	Name                string `json:"name"`
+	URL                 string `json:"url"`
+	Label               Label  `json:"label"`
+	StartDate           time.Time
+	ReleaseDate         time.Time
+	FinishDate          time.Time
+	StoryTotal          int
+	StoryStartedTotal   int
+	StoryFinishedTotal  int
+	StoryDeliveredTotal int
+	StoryAcceptedTotal  int
 }
 
 // Create epics type for sorting on the start date
@@ -158,7 +163,7 @@ func main() {
 		fmt.Printf("\n%s - Start Date: %s, Release Date: %s, Finish Date: %s", epic.Name, epic.StartDate.Format("Jan 2, 2006"), epic.ReleaseDate.Format("Jan 2, 2006"), epic.FinishDate.Format("Jan 2, 2006"))
 	}
 
-	generateHtmlfile(Epics(epics))
+	generateHtmlfile(Epics(epics), iterations)
 }
 
 func getEpics() ([]Epic, error) {
@@ -224,10 +229,72 @@ func getIterations(offset int) ([]Iteration, error) {
 	return iterations, nil
 }
 
-func generateHtmlfile(epics Epics) {
+func generateHtmlfile(epics Epics, iterations []Iteration) {
 	sort.Sort(epics)
 	fmt.Println("SORTED!!!!!!!!")
 	for _, epic := range epics {
 		fmt.Printf("\n%s - Start Date: %s, Release Date: %s, Finish Date: %s", epic.Name, epic.StartDate.Format("Jan 2, 2006"), epic.ReleaseDate.Format("Jan 2, 2006"), epic.FinishDate.Format("Jan 2, 2006"))
 	}
+	// baseCss, _ := ioutil.ReadFile("themes/boostrap.css")
+	// themeCss, _ := ioutil.ReadFile("themes/bootstrap-theme.css")
+
+	html := `<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="stylesheet" type="text/css" href="themes/bootstrap.css">
+<link rel="stylesheet" type="text/css" href="themes/bootstrap-theme.css">
+
+</head>
+<body>
+    <div class="container">
+        <table class="table table-bordered">
+        <caption>Project</caption>
+            <thead><tr><th>Feature</th>`
+
+	for _, iteration := range iterations {
+		html += "<th>" + iteration.Start.Format("Jan 2") + "</th>\n"
+	}
+	html += "</tr></thead><tbody>"
+
+	for _, epic := range epics {
+		if !epic.StartDate.IsZero() {
+			html += "<tr><td>" + epic.Name + "</td>"
+			iterationStart := 0
+			iterationFinish := len(iterations)
+
+			for index, iteration := range iterations {
+				if iteration.Start == epic.StartDate {
+					iterationStart = index
+				}
+				if iteration.Finish == epic.FinishDate {
+					iterationFinish = index
+				}
+			}
+
+			for i := 0; i < len(iterations); i++ {
+
+				if iterationStart == i {
+					html += "<td colspan=\"" + strconv.Itoa(iterationFinish-iterationStart+1) + "\">"
+					html += "<div style='position:relative;width:100%;background-color:green;'>&nbsp;</div>"
+					i += (iterationFinish - iterationStart)
+				} else {
+					html += "<td>"
+				}
+				html += "</td>"
+
+			}
+			html += "</tr>"
+		}
+	}
+
+	html += `
+        </tbody>
+        </table>
+    </div>
+</body>
+</html>`
+
+	ioutil.WriteFile("roadmap.html", []byte(html), 0644)
+
+	fmt.Print(html)
 }
