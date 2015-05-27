@@ -35,13 +35,9 @@ var token string
 var offset = 0
 
 func init() {
-	projectsFlag.Set(os.Getenv("PROJECTS"))
 	flag.StringVar(&token, "token", "", "Pivotal tracker API token")
 	flag.Var(&projectsFlag, "projects", "Comma-separated list of project IDs to add to roadmap")
 	flag.IntVar(&offset, "offset", 0, "Start your iterations at a certain sprint number (ignore all before it)")
-	if token == "" {
-		token = os.Getenv("TOKEN")
-	}
 }
 
 type Label struct {
@@ -123,68 +119,75 @@ type Iteration struct {
 
 func main() {
 	flag.Parse()
+	if len(projectsFlag) == 0 {
+		projectsFlag.Set(os.Getenv("PROJECTS"))
+	}
+	if token == "" {
+		token = os.Getenv("TOKEN")
+	}
+
 	fmt.Println(token)
 	fmt.Println(projectsFlag)
 
-	epics, err := getEpics()
-	//_, err := getEpics()
-	if err != nil {
-		fmt.Println("Couldn't Get Epics!!!")
-	}
+	var projectsHtml []string
 
-	iterations, err := getIterations(offset)
+	for _, pid := range projectsFlag {
+		fmt.Println("PROJECT ID==========================" + pid)
+		epics, err := getEpics(pid)
+		//_, err := getEpics()
+		if err != nil {
+			fmt.Println("Couldn't Get Epics!!!")
+		}
 
-	for _, iteration := range iterations {
-		for _, story := range iteration.Stories {
-			// fmt.Printf("%s : ", story.StoryType)
-			// if story.StoryType == "release" {
-			//  fmt.Printf("#%v", story)
-			// }
-			for _, label := range story.Labels {
-				for eidx, epic := range epics {
-					if label.Name == epic.Label.Name {
-						switch story.StoryType {
-						case "feature":
-							if epic.StartDate.IsZero() {
-								epics[eidx].StartDate = iteration.Start
+		iterations, err := getIterations(pid, offset)
+
+		for _, iteration := range iterations {
+			for _, story := range iteration.Stories {
+				// fmt.Printf("%s : ", story.StoryType)
+				// if story.StoryType == "release" {
+				//  fmt.Printf("#%v", story)
+				// }
+				for _, label := range story.Labels {
+					for eidx, epic := range epics {
+						if label.Name == epic.Label.Name {
+							switch story.StoryType {
+							case "feature":
+								if epic.StartDate.IsZero() {
+									epics[eidx].StartDate = iteration.Start
+								}
+								epics[eidx].FinishDate = iteration.Finish
+							case "release":
+								epics[eidx].ReleaseDate = story.Deadline
 							}
-							epics[eidx].FinishDate = iteration.Finish
-						case "release":
-							epics[eidx].ReleaseDate = story.Deadline
-						}
 
-						epics[eidx].StoryTotal++
+							epics[eidx].StoryTotal++
 
-						switch story.CurrentState {
-						case "unstarted":
-							epics[eidx].StoryUnstartedTotal++
-						case "started":
-							epics[eidx].StoryStartedTotal++
-						case "finished":
-							epics[eidx].StoryFinishedTotal++
-						case "delivered":
-							epics[eidx].StoryDeliveredTotal++
-						case "accepted":
-							epics[eidx].StoryAcceptedTotal++
+							switch story.CurrentState {
+							case "unstarted":
+								epics[eidx].StoryUnstartedTotal++
+							case "started":
+								epics[eidx].StoryStartedTotal++
+							case "finished":
+								epics[eidx].StoryFinishedTotal++
+							case "delivered":
+								epics[eidx].StoryDeliveredTotal++
+							case "accepted":
+								epics[eidx].StoryAcceptedTotal++
+							}
 						}
 					}
+					//fmt.Printf("%s,", label.Name)
 				}
-				//fmt.Printf("%s,", label.Name)
+				//fmt.Print("\n")
 			}
-			//fmt.Print("\n")
 		}
+		projectsHtml = append(projectsHtml, generateProjectHtml(Epics(epics), iterations))
 	}
-
-	for _, epic := range epics {
-		fmt.Printf("\n%s - Start Date: %s, Release Date: %s, Finish Date: %s", epic.Name, epic.StartDate.Format("Jan 2, 2006"), epic.ReleaseDate.Format("Jan 2, 2006"), epic.FinishDate.Format("Jan 2, 2006"))
-	}
-
-	generateHtmlfile(Epics(epics), iterations)
 }
 
-func getEpics() ([]Epic, error) {
+func getEpics(projectId string) ([]Epic, error) {
 	var epics []Epic
-	url := "https://www.pivotaltracker.com/services/v5/projects/" + projectsFlag[0] + "/epics"
+	url := "https://www.pivotaltracker.com/services/v5/projects/" + projectId + "/epics"
 	// Build the request
 	//
 	req, err := http.NewRequest("GET", url, nil)
@@ -213,9 +216,9 @@ func getEpics() ([]Epic, error) {
 	return epics, nil
 }
 
-func getIterations(offset int) ([]Iteration, error) {
+func getIterations(projectId string, offset int) ([]Iteration, error) {
 	var iterations []Iteration
-	url := "https://www.pivotaltracker.com/services/v5/projects/" + projectsFlag[0] + "/iterations?offset=" + strconv.Itoa(offset) + "&limit=20"
+	url := "https://www.pivotaltracker.com/services/v5/projects/" + projectId + "/iterations?offset=" + strconv.Itoa(offset) + "&limit=20"
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -245,27 +248,19 @@ func getIterations(offset int) ([]Iteration, error) {
 	return iterations, nil
 }
 
-func generateHtmlfile(epics Epics, iterations []Iteration) {
+func generateProjectHtml(epics Epics, iterations []Iteration) string {
 	sort.Sort(epics)
-	fmt.Println("SORTED!!!!!!!!")
+
 	for _, epic := range epics {
 		fmt.Printf("\n%s - Start Date: %s, Release Date: %s, Finish Date: %s", epic.Name, epic.StartDate.Format("Jan 2, 2006"), epic.ReleaseDate.Format("Jan 2, 2006"), epic.FinishDate.Format("Jan 2, 2006"))
 	}
+
 	// baseCss, _ := ioutil.ReadFile("themes/boostrap.css")
 	// themeCss, _ := ioutil.ReadFile("themes/bootstrap-theme.css")
 
-	html := `<!DOCTYPE html>
-<html lang="en">
-<head>
-<link rel="stylesheet" type="text/css" href="themes/bootstrap.css">
-<link rel="stylesheet" type="text/css" href="themes/bootstrap-theme.css">
-
-</head>
-<body>
-    <div style="overflow: scroll;">
-        <table class="table table-bordered roadmap">
-        <caption>Project</caption>
-            <thead><tr><th class="project-name">Feature</th>`
+	html := `<table class="table table-bordered roadmap">
+	        <caption>Project</caption>
+	            <thead><tr><th class="project-name">Feature</th>`
 
 	for _, iteration := range iterations {
 		html += "<th>" + iteration.Start.Format("Jan 2") + " - " + iteration.Finish.Format("Jan 2") + "</th>\n"
@@ -321,8 +316,26 @@ func generateHtmlfile(epics Epics, iterations []Iteration) {
 	}
 
 	html += `
-        </tbody>
-        </table>
+	        </tbody>
+	        </table>`
+
+	return html
+}
+
+func generateHtmlfile(projectHtml []string) {
+	html := `<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="stylesheet" type="text/css" href="themes/bootstrap.css">
+<link rel="stylesheet" type="text/css" href="themes/bootstrap-theme.css">
+
+</head>
+<body>
+    <div style="overflow: scroll;">`
+	for _, project := range projectHtml {
+		html += project
+	}
+	html += `
     </div>
 </body>
 </html>`
