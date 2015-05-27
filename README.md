@@ -19,15 +19,17 @@ First, set the following environment variables:
 
 ```
 $ export TOKEN='your Pivotal Tracker API token'
-$ export PROJECT_ID=99
+$ export PROJECTS=99,12345,444
 
 ```
 
-Next, run the app
+Or use command line flags
+
+Then run the app...
 
 ```Go
-$ pivotal-roadmap
+$ pivotal-roadmap -token='my token' -projects=123345,44444,48484848
 ```
 
-Pivotal-roadmap will create an HTML file with your roadmap!
+Pivotal-roadmap will create an HTML file, roadmap.html, with your nice visual roadmap!
 

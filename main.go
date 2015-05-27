@@ -2,16 +2,47 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
-var TOKEN = os.Getenv("TOKEN")
-var PROJECT_ID = os.Getenv("PROJECT_ID")
+// Define a projectsIds type to get multiple project IDs from command line parameters
+type projectids []string
+
+func (p *projectids) String() string {
+	return fmt.Sprint(*p)
+}
+
+func (p *projectids) Set(value string) error {
+	for _, pid := range strings.Split(value, ",") {
+		if strings.TrimSpace(pid) != "" {
+			*p = append(*p, pid)
+		}
+	}
+	return nil
+}
+
+// Implementation of new projects type
+var projectsFlag projectids
+var token string
+var offset = 0
+
+func init() {
+	projectsFlag.Set(os.Getenv("PROJECTS"))
+	flag.StringVar(&token, "token", "", "Pivotal tracker API token")
+	flag.Var(&projectsFlag, "projects", "Comma-separated list of project IDs to add to roadmap")
+	flag.IntVar(&offset, "offset", 0, "Start your iterations at a certain sprint number (ignore all before it)")
+	if token == "" {
+		token = os.Getenv("TOKEN")
+	}
+}
 
 type Label struct {
 	ID        int    `json:"id"`
@@ -34,6 +65,25 @@ type Epic struct {
 	StartDate   time.Time
 	ReleaseDate time.Time
 	FinishDate  time.Time
+}
+
+// Create epics type for sorting on the start date
+type Epics []Epic
+
+func (slice Epics) Len() int {
+	return len(slice)
+}
+
+func (slice Epics) Less(i, j int) bool {
+	// For epics with no start dates, put them at the end of the list
+	// if slice[i].StartDate.IsZero() {
+	// 	return false
+	// }
+	return slice[i].StartDate.Before(slice[j].StartDate)
+}
+
+func (slice Epics) Swap(i, j int) {
+	slice[i], slice[j] = slice[j], slice[i]
 }
 
 type Story struct {
@@ -66,13 +116,17 @@ type Iteration struct {
 }
 
 func main() {
+	flag.Parse()
+	fmt.Println(token)
+	fmt.Println(projectsFlag)
+
 	epics, err := getEpics()
 	//_, err := getEpics()
 	if err != nil {
 		fmt.Println("Couldn't Get Epics!!!")
 	}
 
-	iterations, err := getIterations(60)
+	iterations, err := getIterations(offset)
 
 	for _, iteration := range iterations {
 		for _, story := range iteration.Stories {
@@ -103,18 +157,20 @@ func main() {
 	for _, epic := range epics {
 		fmt.Printf("\n%s - Start Date: %s, Release Date: %s, Finish Date: %s", epic.Name, epic.StartDate.Format("Jan 2, 2006"), epic.ReleaseDate.Format("Jan 2, 2006"), epic.FinishDate.Format("Jan 2, 2006"))
 	}
+
+	generateHtmlfile(Epics(epics))
 }
 
 func getEpics() ([]Epic, error) {
 	var epics []Epic
-	url := "https://www.pivotaltracker.com/services/v5/projects/" + PROJECT_ID + "/epics"
+	url := "https://www.pivotaltracker.com/services/v5/projects/" + projectsFlag[0] + "/epics"
 	// Build the request
 	//
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Add("X-TrackerToken", TOKEN)
+	req.Header.Add("X-TrackerToken", token)
 	// Send the request via a client
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -138,13 +194,13 @@ func getEpics() ([]Epic, error) {
 
 func getIterations(offset int) ([]Iteration, error) {
 	var iterations []Iteration
-	url := "https://www.pivotaltracker.com/services/v5/projects/" + PROJECT_ID + "/iterations?offset=" + strconv.Itoa(offset)
+	url := "https://www.pivotaltracker.com/services/v5/projects/" + projectsFlag[0] + "/iterations?offset=" + strconv.Itoa(offset)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Add("X-TrackerToken", TOKEN)
+	req.Header.Add("X-TrackerToken", token)
 	// Send the request via a client
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -168,6 +224,10 @@ func getIterations(offset int) ([]Iteration, error) {
 	return iterations, nil
 }
 
-// func getEpicStartEndDates(label string) ([]Story, err) {
-
-// }
+func generateHtmlfile(epics Epics) {
+	sort.Sort(epics)
+	fmt.Println("SORTED!!!!!!!!")
+	for _, epic := range epics {
+		fmt.Printf("\n%s - Start Date: %s, Release Date: %s, Finish Date: %s", epic.Name, epic.StartDate.Format("Jan 2, 2006"), epic.ReleaseDate.Format("Jan 2, 2006"), epic.FinishDate.Format("Jan 2, 2006"))
+	}
+}
