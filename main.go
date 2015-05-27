@@ -199,7 +199,7 @@ func getEpics() ([]Epic, error) {
 
 func getIterations(offset int) ([]Iteration, error) {
 	var iterations []Iteration
-	url := "https://www.pivotaltracker.com/services/v5/projects/" + projectsFlag[0] + "/iterations?offset=" + strconv.Itoa(offset)
+	url := "https://www.pivotaltracker.com/services/v5/projects/" + projectsFlag[0] + "/iterations?offset=" + strconv.Itoa(offset) + "&limit=20"
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
