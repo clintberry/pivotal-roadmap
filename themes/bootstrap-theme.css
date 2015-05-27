@@ -1,3 +1,43 @@
+.roadmap th.project-name {
+  min-width:400px;
+}
+
+.roadmap th {
+  min-width:150px;
+}
+
+.roadmap .timeline {
+  background-color: gray;
+  width:100%;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.roadmap .timeline .timeline-accepted {
+  background-color: green;
+  float:left;
+}
+
+.roadmap .timeline .timeline-delivered {
+  background-color: yellow;
+  float:left;
+}
+
+.roadmap .timeline .timeline-finished {
+  background-color: yellow;
+  float:left;
+}
+
+.roadmap .timeline .timeline-started {
+  background-color: yellow;
+  float:left;
+}
+
+
+
+
+
+
 /*!
  * Bootstrap v3.3.4 (http://getbootstrap.com)
  * Copyright 2011-2015 Twitter, Inc.

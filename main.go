@@ -66,6 +66,7 @@ type Epic struct {
 	ReleaseDate         time.Time
 	FinishDate          time.Time
 	StoryTotal          int
+	StoryUnstartedTotal int
 	StoryStartedTotal   int
 	StoryFinishedTotal  int
 	StoryDeliveredTotal int
@@ -150,6 +151,21 @@ func main() {
 							epics[eidx].FinishDate = iteration.Finish
 						case "release":
 							epics[eidx].ReleaseDate = story.Deadline
+						}
+
+						epics[eidx].StoryTotal++
+
+						switch story.CurrentState {
+						case "unstarted":
+							epics[eidx].StoryUnstartedTotal++
+						case "started":
+							epics[eidx].StoryStartedTotal++
+						case "finished":
+							epics[eidx].StoryFinishedTotal++
+						case "delivered":
+							epics[eidx].StoryDeliveredTotal++
+						case "accepted":
+							epics[eidx].StoryAcceptedTotal++
 						}
 					}
 				}
@@ -246,21 +262,31 @@ func generateHtmlfile(epics Epics, iterations []Iteration) {
 
 </head>
 <body>
-    <div class="container">
-        <table class="table table-bordered">
+    <div style="overflow: scroll;">
+        <table class="table table-bordered roadmap">
         <caption>Project</caption>
-            <thead><tr><th>Feature</th>`
+            <thead><tr><th class="project-name">Feature</th>`
 
 	for _, iteration := range iterations {
-		html += "<th>" + iteration.Start.Format("Jan 2") + "</th>\n"
+		html += "<th>" + iteration.Start.Format("Jan 2") + " - " + iteration.Finish.Format("Jan 2") + "</th>\n"
 	}
 	html += "</tr></thead><tbody>"
 
 	for _, epic := range epics {
+		var acceptedPercent float32
+		var deliveredPercent float32
+		var finishedPercent float32
+		var startedPercent float32
+
 		if !epic.StartDate.IsZero() {
 			html += "<tr><td>" + epic.Name + "</td>"
 			iterationStart := 0
 			iterationFinish := len(iterations)
+
+			acceptedPercent = (float32(epic.StoryAcceptedTotal) / float32(epic.StoryTotal)) * 100
+			deliveredPercent = (float32(epic.StoryDeliveredTotal) / float32(epic.StoryTotal)) * 100
+			finishedPercent = (float32(epic.StoryFinishedTotal) / float32(epic.StoryTotal)) * 100
+			startedPercent = (float32(epic.StoryStartedTotal) / float32(epic.StoryTotal)) * 100
 
 			for index, iteration := range iterations {
 				if iteration.Start == epic.StartDate {
@@ -275,7 +301,14 @@ func generateHtmlfile(epics Epics, iterations []Iteration) {
 
 				if iterationStart == i {
 					html += "<td colspan=\"" + strconv.Itoa(iterationFinish-iterationStart+1) + "\">"
-					html += "<div style='position:relative;width:100%;background-color:green;'>&nbsp;</div>"
+					html += "<div class='timeline'>&nbsp;"
+
+					html += "<div class='timeline-accepted' style='width:" + strconv.Itoa(int(acceptedPercent)) + "%'>&nbsp</div>"
+					html += "<div class='timeline-delivered' style='width:" + strconv.Itoa(int(deliveredPercent)) + "%'>&nbsp</div>"
+					html += "<div class='timeline-finished' style='width:" + strconv.Itoa(int(finishedPercent)) + "%'>&nbsp</div>"
+					html += "<div class='timeline-started' style='width:" + strconv.Itoa(int(startedPercent)) + "%'>&nbsp</div>"
+
+					html += "</div>"
 					i += (iterationFinish - iterationStart)
 				} else {
 					html += "<td>"
