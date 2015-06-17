@@ -2,42 +2,40 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
-	"os"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
+
+	"github.com/BurntSushi/toml"
 )
 
-// Define a projectsIds type to get multiple project IDs from command line parameters
-type projectids []string
-
-func (p *projectids) String() string {
-	return fmt.Sprint(*p)
+type ProjectConfig struct {
+	ProjectId string `toml:"project_id"`
+	Offset    int    `toml:"offset"`
+}
+type Config struct {
+	Token         string          `toml:"token"`
+	ProjectConfig []ProjectConfig `toml:"project"`
 }
 
-func (p *projectids) Set(value string) error {
-	for _, pid := range strings.Split(value, ",") {
-		if strings.TrimSpace(pid) != "" {
-			*p = append(*p, pid)
-		}
-	}
-	return nil
-}
-
-// Implementation of new projects type
-var projectsFlag projectids
+var config Config
 var token string
-var offset = 0
 
 func init() {
-	flag.StringVar(&token, "token", "", "Pivotal tracker API token")
-	flag.Var(&projectsFlag, "projects", "Comma-separated list of project IDs to add to roadmap")
-	flag.IntVar(&offset, "offset", 0, "Start your iterations at a certain sprint number (ignore all before it)")
+	configBlob, err := ioutil.ReadFile("config.toml")
+	fmt.Println(string(configBlob))
+	if err != nil {
+		log.Fatal(err)
+	}
+	if _, err := toml.Decode(string(configBlob), &config); err != nil {
+		log.Fatal(err)
+	}
+
+	token = config.Token
 }
 
 type Label struct {
@@ -111,27 +109,22 @@ type Iteration struct {
 	Kind         string    `json:"kind"`
 	Number       int       `json:"number"`
 	ProjectID    int       `json:"project_id"`
-	TeamStrength int       `json:"team_strength"`
+	TeamStrength float32   `json:"team_strength"`
 	Stories      []Story   `json:"stories"`
 	Start        time.Time `json:"start"`
 	Finish       time.Time `json:"finish"`
 }
 
 func main() {
-	flag.Parse()
-	if len(projectsFlag) == 0 {
-		projectsFlag.Set(os.Getenv("PROJECTS"))
-	}
-	if token == "" {
-		token = os.Getenv("TOKEN")
-	}
-
-	fmt.Println(token)
-	fmt.Println(projectsFlag)
 
 	var projectsHtml []string
 
-	for _, pid := range projectsFlag {
+	for _, project := range config.ProjectConfig {
+		pid := project.ProjectId
+		offset := project.Offset
+
+		fmt.Printf("ProjectID: %s, Offset: %i", pid, offset)
+
 		fmt.Println("PROJECT ID==========================" + pid)
 		epics, err := getEpics(pid)
 		//_, err := getEpics()
@@ -183,6 +176,7 @@ func main() {
 		}
 		projectsHtml = append(projectsHtml, generateProjectHtml(Epics(epics), iterations))
 	}
+	generateHtmlfile(projectsHtml)
 }
 
 func getEpics(projectId string) ([]Epic, error) {
@@ -218,32 +212,66 @@ func getEpics(projectId string) ([]Epic, error) {
 
 func getIterations(projectId string, offset int) ([]Iteration, error) {
 	var iterations []Iteration
-	url := "https://www.pivotaltracker.com/services/v5/projects/" + projectId + "/iterations?offset=" + strconv.Itoa(offset) + "&limit=20"
+	// Have to hit the API multiple times for paginating until we get all results
+	currentOffset := offset
+	paginating := true
+	for paginating == true {
+		var paginatedIterations []Iteration
+		url := "https://www.pivotaltracker.com/services/v5/projects/" + projectId + "/iterations?offset=" + strconv.Itoa(currentOffset) + "&limit=20"
 
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Add("X-TrackerToken", token)
-	// Send the request via a client
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	// Defer the closing of the body
-	defer resp.Body.Close()
-	// Read the content into a byte array
-	body, err := ioutil.ReadAll(resp.Body)
-	//fmt.Println(string(body))
-	if err != nil {
-		return nil, err
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Add("X-TrackerToken", token)
+		// Send the request via a client
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		if err != nil {
+			fmt.Println(err.Error())
+			return nil, err
+		}
+
+		paginationLimit, err := strconv.Atoi(resp.Header.Get("X-Tracker-Pagination-Limit"))
+		paginationOffset, err := strconv.Atoi(resp.Header.Get("X-Tracker-Pagination-Offset"))
+		paginationTotal, err := strconv.Atoi(resp.Header.Get("X-Tracker-Pagination-Total"))
+		paginationReturned, err := strconv.Atoi(resp.Header.Get("X-Tracker-Pagination-Returned"))
+
+		fmt.Println("Pagination Limit: " + strconv.Itoa(paginationLimit))
+		fmt.Println("Pagination Offset: " + strconv.Itoa(paginationOffset))
+		fmt.Println("Pagination Total: " + strconv.Itoa(paginationTotal))
+		fmt.Println("Pagination Returned: " + strconv.Itoa(paginationReturned))
+		fmt.Println(strconv.Itoa(paginationOffset + paginationReturned))
+
+		// Defer the closing of the body
+		defer resp.Body.Close()
+		// Read the content into a byte array
+		body, err := ioutil.ReadAll(resp.Body)
+		//fmt.Println(string(body))
+		if err != nil {
+			fmt.Println(err.Error())
+			return nil, err
+		}
+
+		err = json.Unmarshal(body, &paginatedIterations)
+		if err != nil {
+			fmt.Println(err.Error())
+			return nil, err
+		}
+
+		for _, iteration := range paginatedIterations {
+			iterations = append(iterations, iteration)
+		}
+		// Have we gotten all results yet? If not, increment the offset and run again, otherwise break loop
+
+		if (paginationOffset + paginationReturned) < paginationTotal {
+			fmt.Println("More results available... let's go get 'em")
+			currentOffset += paginationReturned
+		} else {
+			paginating = false
+		}
 	}
 
-	err = json.Unmarshal(body, &iterations)
-	if err != nil {
-		return nil, err
-	}
 	// At this point we're done - simply return the bytes
 	return iterations, nil
 }
