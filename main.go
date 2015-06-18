@@ -38,6 +38,42 @@ func init() {
 	token = config.Token
 }
 
+type Project struct {
+	AccountID                    int    `json:"account_id"`
+	AtomEnabled                  bool   `json:"atom_enabled"`
+	AutomaticPlanning            bool   `json:"automatic_planning"`
+	BugsAndChoresAreEstimatable  bool   `json:"bugs_and_chores_are_estimatable"`
+	CreatedAt                    string `json:"created_at"`
+	CurrentIterationNumber       int    `json:"current_iteration_number"`
+	Description                  string `json:"description"`
+	EnableFollowing              bool   `json:"enable_following"`
+	EnableIncomingEmails         bool   `json:"enable_incoming_emails"`
+	EnableTasks                  bool   `json:"enable_tasks"`
+	HasGoogleDomain              bool   `json:"has_google_domain"`
+	ID                           int    `json:"id"`
+	InitialVelocity              int    `json:"initial_velocity"`
+	IterationLength              int    `json:"iteration_length"`
+	Kind                         string `json:"kind"`
+	Name                         string `json:"name"`
+	NumberOfDoneIterationsToShow int    `json:"number_of_done_iterations_to_show"`
+	PointScale                   string `json:"point_scale"`
+	PointScaleIsCustom           bool   `json:"point_scale_is_custom"`
+	ProfileContent               string `json:"profile_content"`
+	ProjectType                  string `json:"project_type"`
+	Public                       bool   `json:"public"`
+	StartDate                    string `json:"start_date"`
+	StartTime                    string `json:"start_time"`
+	TimeZone                     struct {
+		Kind      string `json:"kind"`
+		Offset    string `json:"offset"`
+		OlsonName string `json:"olson_name"`
+	} `json:"time_zone"`
+	UpdatedAt            string `json:"updated_at"`
+	VelocityAveragedOver int    `json:"velocity_averaged_over"`
+	Version              int    `json:"version"`
+	WeekStartDay         string `json:"week_start_day"`
+}
+
 type Label struct {
 	ID        int    `json:"id"`
 	ProjectID int    `json:"project_id"`
@@ -126,12 +162,17 @@ func main() {
 		fmt.Printf("ProjectID: %s, Offset: %i", pid, offset)
 
 		fmt.Println("PROJECT ID==========================" + pid)
+
+		project, err := getProjectSettings(pid)
+		if err != nil {
+			fmt.Println("Couldn't load project settings")
+		}
+
 		epics, err := getEpics(pid)
 		//_, err := getEpics()
 		if err != nil {
 			fmt.Println("Couldn't Get Epics!!!")
 		}
-
 		iterations, err := getIterations(pid, offset)
 
 		for _, iteration := range iterations {
@@ -174,9 +215,39 @@ func main() {
 				//fmt.Print("\n")
 			}
 		}
-		projectsHtml = append(projectsHtml, generateProjectHtml(Epics(epics), iterations))
+		projectsHtml = append(projectsHtml, generateProjectHtml(project, Epics(epics), iterations))
 	}
 	generateHtmlfile(projectsHtml)
+}
+
+func getProjectSettings(projectId string) (Project, error) {
+	var project Project
+	url := "https://www.pivotaltracker.com/services/v5/projects/" + projectId
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return project, err
+	}
+	req.Header.Add("X-TrackerToken", token)
+	// Send the request via a client
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return project, err
+	}
+	// Defer the closing of the body
+	defer resp.Body.Close()
+	// Read the content into a byte array
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return project, err
+	}
+	err = json.Unmarshal(body, &project)
+	if err != nil {
+		return project, err
+	}
+	// At this point we're done - simply return the bytes
+	return project, nil
 }
 
 func getEpics(projectId string) ([]Epic, error) {
@@ -276,7 +347,7 @@ func getIterations(projectId string, offset int) ([]Iteration, error) {
 	return iterations, nil
 }
 
-func generateProjectHtml(epics Epics, iterations []Iteration) string {
+func generateProjectHtml(project Project, epics Epics, iterations []Iteration) string {
 	sort.Sort(epics)
 
 	for _, epic := range epics {
@@ -287,11 +358,15 @@ func generateProjectHtml(epics Epics, iterations []Iteration) string {
 	// themeCss, _ := ioutil.ReadFile("themes/bootstrap-theme.css")
 
 	html := `<table class="table table-bordered roadmap">
-	        <caption>Project</caption>
+	        <caption><h3>`
+
+	html += project.Name
+
+	html += `</h3></caption>
 	            <thead><tr><th class="project-name">Feature</th>`
 
 	for _, iteration := range iterations {
-		html += "<th>" + iteration.Start.Format("Jan 2") + " - " + iteration.Finish.Format("Jan 2") + "</th>\n"
+		html += "<th>" + iteration.Start.Format("Jan 2") + " - " + iteration.Finish.Format("Jan 2, 2006") + "</th>\n"
 	}
 	html += "</tr></thead><tbody>"
 
@@ -302,9 +377,11 @@ func generateProjectHtml(epics Epics, iterations []Iteration) string {
 		var startedPercent float32
 
 		if !epic.StartDate.IsZero() {
+
 			html += "<tr><td>" + epic.Name + "</td>"
 			iterationStart := 0
 			iterationFinish := len(iterations)
+			iterationRelease := 0
 
 			acceptedPercent = (float32(epic.StoryAcceptedTotal) / float32(epic.StoryTotal)) * 100
 			deliveredPercent = (float32(epic.StoryDeliveredTotal) / float32(epic.StoryTotal)) * 100
@@ -318,12 +395,19 @@ func generateProjectHtml(epics Epics, iterations []Iteration) string {
 				if iteration.Finish == epic.FinishDate {
 					iterationFinish = index
 				}
+				if epic.ReleaseDate.After(iteration.Start) && epic.ReleaseDate.Before(iteration.Finish) {
+					iterationRelease = index
+				}
+			}
+			epicEnd := iterationFinish
+			if iterationRelease != 0 && (iterationRelease > iterationFinish) {
+				epicEnd = iterationRelease
 			}
 
 			for i := 0; i < len(iterations); i++ {
 
 				if iterationStart == i {
-					html += "<td colspan=\"" + strconv.Itoa(iterationFinish-iterationStart+1) + "\">"
+					html += "<td colspan=\"" + strconv.Itoa(epicEnd-iterationStart+1) + "\">"
 					html += "<div class='timeline'>&nbsp;"
 
 					html += "<div class='timeline-accepted' style='width:" + strconv.Itoa(int(acceptedPercent)) + "%'>&nbsp</div>"
